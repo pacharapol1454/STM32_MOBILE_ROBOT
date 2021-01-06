@@ -35,6 +35,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "stdio.h"
+#include "math.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -53,6 +54,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim5;
@@ -63,7 +65,7 @@ DMA_HandleTypeDef hdma_usart2_rx;
 /* USER CODE BEGIN PV */
 uint8_t direction_l = 1;
 uint8_t direction_r = 0;
-
+float cycleTime = 0.1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -75,6 +77,7 @@ static void MX_TIM3_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM5_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -86,36 +89,75 @@ uint8_t myRxData[16];
 uint8_t testRxData[27]; // 21+\r+\n
 //int RxSize = sizeof(testRxData) / sizeof(testRxData[0]);
 int i = 0;
+
 char buffer[50];
 float wl,wr,dl,dr;
 float _wl,_wr,_dl,_dr;
-int encoder_value_l = 0;
-int encoder_value_r = 0;
+long encoder_value_l = 0;
+long encoder_value_r = 0;
 uint32_t en_l = 0;
+float _mps_l = 0.0;
+float _mps_r = 0.0;
 float rpm_value_l = 0.00;
 float rpm_value_r = 0.00;
 uint8_t MSG1[50];
 uint8_t MSG1_length;
 uint8_t MSG2[50];
 uint8_t MSG2_length;
+uint8_t MSG3[50];
+uint8_t MSG3_length;
+//uint8_t MSGTEST[50];
+//uint8_t MSGTEST_length;
+uint8_t MSGOUTPUT[50];
+uint8_t MSGOUTPUT_length;
 uint8_t RX2_Char[2];
 uint8_t Char_Buffer[20];
 uint8_t Char_Buffer_length = 0;
 uint8_t Char_Buffer_isRecieving = 0;
+float cumError_l = 0.0;
+float cumError_r = 0.0;
+float error_l = 0.0;
+float error_r = 0.0;
+float error_p_l = 0.0;
+float error_p_r = 0.0;
+float kd_l=0;
+float kd_r=0;
+float ki_l=0.000001;
+float ki_r=0.000001;
+
+float kp_l=100;
+float kp_r=100;
+
+float ErrorI_l = 0.0;
+float ErrorI_r = 0.0;
+
+int pwm_l = 0;
+int pwm_r = 0;
+
+float output_l = 0.0;
+float output_r = 0.0;
+float rateError_l = 0.0;
+float rateError_r = 0.0;
 float testval = 599;
+float mps_l = 0.0;
+float mps_r = 0.0;
+float wheel_diameter = 0.108;
+//for test begin
+long test_encoder=0;
+//for test end
 void setSpeed(){
 	//HAL_GPIO_TogglePin(GPIO)
 	HAL_GPIO_WritePin(MOTOR_DIRECTION1_GPIO_Port,MOTOR_DIRECTION1_Pin,_dl);
 	HAL_GPIO_WritePin(MOTOR_DIRECTION2_GPIO_Port,MOTOR_DIRECTION2_Pin,!_dl);
-	//__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, wl*1000.0);
+//	__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, pwm_l);
 	//HAL_GPIO_WritePin(MOTOR_PWM_GPIO_Port,MOTOR2_PWM_Pin,direction_r);
 	HAL_GPIO_WritePin(MOTOR2_DIRECTION1_GPIO_Port,MOTOR2_DIRECTION1_Pin,_dr);
 	HAL_GPIO_WritePin(MOTOR2_DIRECTION2_GPIO_Port,MOTOR2_DIRECTION2_Pin,!_dr);
-	//__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, wl*1000.0);
-	//MX_TIM4_Init();
-	//HAL_Delay(1);
-	htim4.Instance->CCR1=_wr*1000.0;
-	htim4.Instance->CCR2=_wl*1000.0;
+//	__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
+
+//	htim4.Instance->CCR1=wr*1000;
+	htim4.Instance->CCR1=pwm_r;
+	htim4.Instance->CCR2=pwm_l;
 
 	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
@@ -123,6 +165,12 @@ void setSpeed(){
 //	__HAL_TIM_SET_AUTORELOAD(&htim4, wl*1000.0);
 
 }
+double convert2mps(int en_val){
+	double output;
+	output = en_val * 0.000015773 / 0.1;
+	return output;
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -132,7 +180,7 @@ void setSpeed(){
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
+	//int a = log(EN_L);
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -159,11 +207,13 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM1_Init();
   MX_TIM5_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   HAL_UART_Receive_DMA(&huart2, testRxData, 27);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
   HAL_TIM_Base_Start_IT(&htim1);
+  HAL_TIM_Base_Start_IT(&htim2);
   HAL_TIM_Base_Start_IT(&htim3);
   HAL_TIM_Base_Start_IT(&htim5);
   //necessary for encoder init begin
@@ -171,7 +221,12 @@ int main(void)
   HAL_TIM_Encoder_Start_IT(&htim5, TIM_CHANNEL_ALL);
   //necessary for encoder init end
   /* USER CODE END 2 */
-
+  pwm_l = 0;
+  pwm_r = 0;
+  cumError_l=0;
+  cumError_r=0;
+  ErrorI_l=0;
+  ErrorI_r=0;
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -179,19 +234,6 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  //HAL_UART_Transmit(&huart2, myTxData, 13, 100);
-	  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-	  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-	  encoder_value_l = htim3.Instance->CNT - 30000;
-	  encoder_value_r = htim5.Instance->CNT - 30000;
-	  htim3.Instance->CNT = 30000;
-	  htim5.Instance->CNT = 30000;
-
-	  //RPM VALUE SHOULD BE ((EN_VAL*60)/PPR)/GEAR_RATIO
-	  rpm_value_l = (encoder_value_l*60.0)/46000.0;
-	  rpm_value_r = (encoder_value_r*60.0)/46000.0;
-	  MSG1_length = sprintf(MSG1,"EncoderL = %d RPM = %.2f\r\n", encoder_value_l, rpm_value_l);
-	  MSG2_length = sprintf(MSG2,"EncoderR = %d RPM = %.2f\r\n", encoder_value_r, rpm_value_r);
 
 	  HAL_Delay(1000);
   }
@@ -285,6 +327,51 @@ static void MX_TIM1_Init(void)
   /* USER CODE BEGIN TIM1_Init 2 */
 
   /* USER CODE END TIM1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 35999;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 800;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
 
 }
 
@@ -556,27 +643,132 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   _wr = wr;
   _dl = dl;
   _dr = dr;
-  HAL_UART_Transmit(&huart2, buffer, buffer_length, 100);
-  HAL_UART_Transmit(&huart2, MSG1, MSG1_length, 100);
-  HAL_UART_Transmit(&huart2, MSG2, MSG2_length, 100);
-  setSpeed();
-}
-/*
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
-//	HAL_GPIO_TogglePin(Ld2_GPIO_Port,Ld2_Pin);
-
   HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+  /*
   encoder_value_l = htim3.Instance->CNT - 30000;
   encoder_value_r = htim5.Instance->CNT - 30000;
   htim3.Instance->CNT = 30000;
   htim5.Instance->CNT = 30000;
+
   //RPM VALUE SHOULD BE ((EN_VAL*60)/PPR)/GEAR_RATIO
-  rpm_value_l = encoder_value_l*60.0/46000.0;
-  rpm_value_r = encoder_value_r*60.0/46000.0;
-  MSG1_length = sprintf(MSG1,"EncoderL = %d RPM = %.2f\r\n", encoder_value_l, rpm_value_l);
-  MSG2_length = sprintf(MSG2,"EncoderR = %d RPM = %.2f\r\n", encoder_value_r, rpm_value_r);
-  HAL_Delay(1000);
+  rpm_value_l = (encoder_value_l*60.0)/46000.0;
+  rpm_value_r = (encoder_value_r*60.0)/46000.0;
+  ms_l = (rpm_value_l/60)*wheel_diameter;
+  MSG1_length = sprintf(MSG1,"EncoderL = %d RPM = %.2f\r\nOUTPUT_L=%f\r\n", encoder_value_l, rpm_value_l,output_l);
+  MSG2_length = sprintf(MSG2,"EncoderR = %d RPM = %.2f\r\nOUTPUT_R=%f\r\n", encoder_value_r, rpm_value_r,output_r);
+  */
+  HAL_UART_Transmit(&huart2, buffer, buffer_length, 100);}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* Prevent unused argument(s) compilation warning */
+  if(htim->Instance == TIM2){
+	  //HAL_UART_Transmit(&huart2, "hi\r\n", 4, 100);
+
+	  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	  encoder_value_l = htim3.Instance->CNT - 30000;
+	  encoder_value_r = htim5.Instance->CNT - 30000;
+	  /*
+	  if(test_encoder<0){
+		  test_encoder*=-1;
+	  }
+	  */
+	  test_encoder += encoder_value_l;
+	  htim3.Instance->CNT = 30000;
+	  htim5.Instance->CNT = 30000;
+
+	  //RPM VALUE SHOULD BE ((EN_VAL*60)/PPR)/GEAR_RATIO
+	  /*
+	  rpm_value_l = (encoder_value_l*60.0)/46000.0;
+	  rpm_value_r = (encoder_value_r*60.0)/46000.0;
+	  ms_l = (rpm_value_l/60)*wheel_diameter;
+	  */
+	  mps_l = convert2mps(encoder_value_l);
+	  mps_r = convert2mps(encoder_value_r);
+	  MSG1_length = sprintf(MSG1,"EncoderL = %d MPS_L = %.2f m/s\r\n", encoder_value_l, mps_l);
+	  MSG2_length = sprintf(MSG2,"EncoderR = %d MPS_R = %.2f m/s\r\n", encoder_value_r, mps_r);
+	  /*
+	  MSGTEST_length = sprintf(MSGTEST,"\nTEST = %d\r\n",test_encoder);
+	  */
+	  //MSGOUTPUT AFTER PID
+	  if(mps_l<0){
+		  _mps_l=mps_l*-1;
+	  }
+	  else{
+		  _mps_l=mps_l;
+	  }
+	  if(mps_r<0){
+		  _mps_r=mps_r;
+	  }
+	  else{
+		  _mps_r=mps_r;
+	  }
+
+	  error_l = _wl - _mps_l;
+	  error_r = _wr - _mps_r;
+
+	  cumError_l += error_l;// * cycleTime;
+	  //rateError_l += (error_l - error_p_l)/cycleTime;
+	  //output_l = kp_l*error_l + ki_l*cumError_l + kd_l*rateError_l;
+	  //error_p_l = error_l;
+
+	  cumError_r += error_r;// * cycleTime;
+	  //rateError_r += (error_r - error_p_r)/cycleTime;
+	  //output_r = kp_r*error_r + ki_r*cumError_r + kd_r*rateError_r;
+	  //error_p_r = error_r;
+
+	  //pwm_l += (kp_l*error_l);
+	  //pwm_r += (kp_r*error_r);
+	  ErrorI_l = ki_l*cumError_l;
+	  ErrorI_r = ki_r*cumError_r;
+	  pwm_l += kp_l*error_l+ErrorI_l;
+	  pwm_r += kp_r*error_r+ErrorI_r;
+
+	  if(pwm_l < 0) pwm_l = 0;
+	  if(pwm_l < 50 && error_l < 0.0001) pwm_l = 0;
+	  if(pwm_l > 400) pwm_l = 400;
+	  if(_wl < 0.0001) pwm_l = 0;
+
+	  if(pwm_r < 0) pwm_r = 0;
+	  if(pwm_r < 50 && error_r < 0.0001) pwm_r = 0;
+	  if(pwm_r > 400) pwm_r = 400;
+	  if(_wr < 0.0001) pwm_r = 0;
+
+	  //USE OUTPUT_L
+
+
+	  //USE OUTPUT_R
+	  //MSGOUTPUT_length = sprintf(MSGOUTPUT, "Output_l = %f\tOutput_r = %f\r\npwm_l = %d\r\n",output_l,output_r,pwm_l);
+	  MSG1_length = sprintf(MSG1, "Target_wl=%.2f m/s\tEnc_l=%.2f m/s\tpwm_r=%d\r\n",_wl,mps_l,pwm_l);
+	  MSG2_length = sprintf(MSG2, "Target_wr=%.2f m/s\tEnc_r=%.2f m/s\tpwm_r=%d\r\n",_wr,mps_r,pwm_r);
+	  MSG3_length = sprintf(MSG3, "ErrorI_l = %.2f\tErrorI_r = %.2f\r\n",ErrorI_l,ErrorI_r);
+	  //USE OUTPUT_R
+	  //previousTime = currentTime;
+	  HAL_UART_Transmit(&huart2, MSG1, MSG1_length, 50);
+	  HAL_UART_Transmit(&huart2, MSG2, MSG2_length, 50);
+	  HAL_UART_Transmit(&huart2, MSG3, MSG3_length, 50);
+//	  HAL_UART_Transmit(&huart2, MSGOUTPUT, MSGOUTPUT_length, 100);
+
+	  setSpeed();
+
+  }
+
+  /* NOTE : This function should not be modified, when the callback is needed,
+            the HAL_TIM_PeriodElapsedCallback could be implemented in the user file
+   */
+}
+/*
+float computePID(struct PIDValues wheel){  //float _input, float _setPoint
+  //currentTime = millis();
+  //elapsedTime = (float)(currentTime-elapsedTime);
+  error_l = _wl - encoder_value_l;
+  cumError_l += _wl * cycleTime;
+  rateError_l += (error_l - error_p_l)/cycleTime;
+  output_l = kp*wheel.error + ki*cumError_l + kd*rateError_l;
+  error_p_l = error_l;
+  //previousTime = currentTime;
+  return output_l;
 }
 */
 /* USER CODE END 4 */
