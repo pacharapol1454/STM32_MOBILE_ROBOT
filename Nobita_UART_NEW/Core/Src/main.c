@@ -25,8 +25,10 @@
  * MOTOR2_DIRECTION2 = PB9 = D14
  * TIM4_CH1 = PB6 = D12
  * TIM4_CH2 = PB7 = D11
- * TIM2_CH1 = PA0 =
- * TIM2_CH2 = PA1 =
+ * TIM5_CH1 = PA0 = A0
+ * TIM5_CH2 = PA1 = A1
+ * TIM3_CH1 = PA6 = D12
+ * TIM3_CH2 = PA7 = D11
  */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
